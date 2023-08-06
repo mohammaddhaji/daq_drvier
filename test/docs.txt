@@ -1,0 +1,278 @@
+                  **************************************
+******************* How To Build The Operating System? *******************
+                  **************************************
+
+----------------------------------------------------------------------------
+For preparing OS we use TI sdks and Buildroot. In order to download the sdk
+you can refer to ti website using the link below:
+
+https://www.ti.com/tool/download/PROCESSOR-SDK-LINUX-RT-AM57X/
+
+Download the lastest versin of linux rt sdk or you can access this file in
+sdk folder.
+
+Install the sdk by running below command. Make sure the file has proper
+permissions.
+
+$ ./ti-processor-sdk-linux-rt-am57xx-evm-08_02_01_00-Linux-x86-Install.bin
+
+----------------------------------------------------------------------------
+After installing the sdk, in board-support folder, we need to create a 
+tarball of linux and u-boot sources.
+
+Use below commands to do it:
+
+$ tar -czf linux.tar.gz linux-rt-5.10.100+gitAUTOINC+204ec708dc-g204ec708dc/
+$ tar -czf uboot.tar.gz u-boot-2021.01+gitAUTOINC+44a87e3ab8-g44a87e3ab8/
+
+Later we will give the path of linux and u-boot tarballs to Buildroot.
+
+NOTE: Befor creating tarball of u-boot, read pin_configuration.txt file to 
+      undrestand how to configure pin modes of SoC.
+
+----------------------------------------------------------------------------
+We use crosstool-ng to create our custom toolchain. We will do a cross build
+and build a cross compiler that buildroot is going to use that and also a 
+cross native build that generates a compiler for our target board.
+
+To download and install crosstool-ng use below commands:
+
+$ git clone --depth 1 --branch crosstool-ng-1.25.0 https://github.com/crosstool-ng/crosstool-ng.git
+$ cd crosstool-ng
+$ ./bootstrap
+$ ./configure --enable-local
+$ make
+
+After that run below command to load configs that is specific for our cpu:
+
+$ ./ct-ng arm-cortex_a15-linux-gnueabihf
+
+Get into crosstool-ng menuconfig and do below changes:
+
+$ ./ct-ng menuconfig
+
+Operating System ---> Version of linux ---> 5.10.100
+
+Exit and save changes and run below command to build our cross compiler
+which will take some hours to complete.
+
+$ ./ct-ng build
+
+After the building of our cross-compiler is completed, you can see the result
+in ~/x-tools/arm-cortex_a15-linux-gnueabihf directory. go to bin folder and 
+put the current directory in PATH variable:
+
+$ export PATH=$PATH:`pwd`
+
+After that get back to crosstool-ng menuconfig and do below changes to
+build a compiler for our target board.
+
+Toolchain options ---> Type ---> Canadian
+Toolchain options ---> Host system ---> Tuple=arm-cortex_a15-linux-gnueabihf
+
+Exit and save changes and run build command. After some hours our target compiler
+is ready and you have it in ~/x-tools/HOST-arm-cortex_a15-linux-gnueabihf directory.
+
+----------------------------------------------------------------------------
+Download the buildroot using git.
+
+$ git clone --depth 1 --branch 2021.08-rc1 https://github.com/buildroot/buildroot.git buildroot-2021.08-rc1
+
+By default buildroot does not support gcc compiler for target. We need to
+apply a patch to buildroot source so we can enable it. We have put this
+gcc-patch in config_files folder.
+
+You can use below commands to do this step:
+
+$ cd buildroot-2021.08-rc1
+$ patch --ignore-whitespace --fuzz 3 -p1 < path/to/gcc-patch
+
+We want to do a out of tree build so we create a directory and cd to it:
+
+$ mkdir br_output && cd br_output
+
+Start the out of tree build:
+
+$ make -C ../buildroot-2021.08-rc1/ O=$(pwd) beagleboardx15_defconfig
+
+Now the defconfig for our board has been loaded. Run below command to get 
+into menuconfig and make required changes:
+
+$ make menuconfig
+
+----------------------------------------------------------------------------
+Build options:
+
+In Build options menu do below configurations:
+
+You can use the BR2_DEFCONFIG config to save all configurations in a separate file.
+
+Build options ---> Location to save buildroot config
+
+After setting this config you can use the command below to save configurations
+in the specified file:
+
+$ make savedefconfig
+
+If you want to save the buildroot downloads in a separate directory, you can 
+use the BR2_DL_DIR config for this purpose:
+
+Build options ---> Download dir
+
+----------------------------------------------------------------------------
+Toolchain:
+
+In Toolchain menu do below configurations:
+
+Toolchain ---> Toolchain type ---> External toolchain
+Toolchain ---> Toolchain ---> Custom toolchain
+Toolchain ---> Toolchain prefix ---> arm-cortex_a15-linux-gnueabihf
+Toolchain ---> External toolchain kernel headers series ---> 5.10.x
+Toolchain ---> External toolchain C library ---> glibc/eglibc
+Toolchain ---> [*] Toolchain has C++ support
+
+----------------------------------------------------------------------------
+System configuration:
+
+In System configuration menu do below configurations:
+
+System configuration ---> System hostname ---> x15
+System configuration ---> System banner ---> Welcome to beagleboard-X15
+System configuration ---> /dev management ---> Dynamic using devtmpfs + eudev
+System configuration ---> Root password ---> abcd
+
+----------------------------------------------------------------------------
+Kernel:
+
+In Kernel menu do below configurations:
+
+Kernel ---> Kernel version ---> Custom tarball
+Kernel ---> URL of custom kernel tarball ---> file:///path/to/linux.tar.gz
+Kernel ---> Defconfig name ---> tisdk_am57xx-evm-rt
+Kernel ---> In-tree Device Tree Source file names ---> am57xx-beagle-x15-revc
+Kernel ---> Out-of-tree Device Tree Source file paths ---> /path/to/am57xx-beagle-x15-revc.dts
+|
+|---------> This file will be copied to linux source and compile from there.
+            So we put all the necessary settings for the devicetree in this file.
+
+            You can use am57xx-beagle-x15-revc.dts file which is in custom_dts folder.
+
+----------------------------------------------------------------------------
+Target packages:
+
+In Target packages menu do below configurations:
+
+Target packages ---> [*] show packages that are also provided by busybox
+Target packages ---> Development tools ---> gcc, make, pkgconfig 
+                                       ---> {git, grep, tree} [Optional]
+
+Target packages ---> Graphic libraries and applications (graphic/text) --->
+                     Qt5 ---> gui module ---> widgets module
+                                         ---> Default graphical platfor (linuxfb)
+                                         ---> fontconfig support
+                                         ---> JPEG support
+                                         ---> PNG support
+
+Target packages ---> Fonts, cursors, icons, sounds and themes ---> DejaVu fonts
+
+Target packages ---> Interpreter languages and scripting ---> python3 --->
+                     core python3 modules ---> xml module
+
+Target packages ---> Interpreter languages and scripting ---> python3 --->
+                     External python modules ---> python-{pyqt5, serial, spidev}
+
+Target packages ---> Libraries ---> Hardware handling ---> libgpiod, libusb
+Target packages ---> Networking applications ---> {openssh, autossh, ethtool}
+Target packages ---> System tools ---> util-linux ---> {basic set, kill, mount/umount}
+Target packages ---> Text editors and viewers ---> nano
+
+----------------------------------------------------------------------------
+Filesystem images:
+
+In Filesystem images menu do below configurations:
+
+Filesystem images ---> exact size ---> 300M
+
+----------------------------------------------------------------------------
+Bootloaders:
+
+In Bootloaders menu do below configurations:
+
+Bootloaders ---> U-Boot Version ---> Custom tarball
+Bootloaders ---> URL of custom U-Boot tarball ---> file:///path/to/uboot.tar.gz
+
+----------------------------------------------------------------------------
+Now exit this menu and save changes. After that we need to enable spi driver
+to access it from userspace. In order to do that follow below commands:
+
+$ make linux-menuconfig
+
+Device Drivers ---> SPI support ---> <*> User mode SPI device driver support
+
+----------------------------------------------------------------------------
+Befor we run make command we need to modify genimage.cfg file. This file is
+in buildroot source in board/beagleboardx15/ directory.
+
+Open this file and edit boot.vfat like below:
+
+image boot.vfat {
+      vfat {
+            files = {
+                  "MLO",
+                  "u-boot.img",
+                  "am57xx-beagle-x15-revc.dtb",
+                  "zImage"
+            }
+      }
+      size = 100M
+}
+
+----------------------------------------------------------------------------
+If you want to add something to sdcard.img you can mount the image in this
+way:
+
+$ fdisk -l sdcard.img
+Disk sdcard.img: 504 MiB, 528482816 bytes, 1032193 sectors
+Units: sectors of 1 * 512 = 512 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+Disklabel type: dos
+Disk identifier: 0x00000000
+
+Device      Boot Start     End Sectors  Size Id Type
+sdcard.img1 *        1    8192    8192    4M  c W95 FAT32 (LBA)
+sdcard.img2       8193 1056768 1048576  512M 83 Linux
+
+
+This will show you the block-size and the start-block of the partitions. 
+You can use that to calculate the offset.
+
+Here if I want to mount the second partition (rootfs), I have a block-size 
+of 512 bytes and the start-block is 8193. The offset is 512 * 8193 = 4194816
+
+So the mount command would be:
+
+$ sudo mount -o loop,offset=4194816 sdcard.img /mnt
+
+----------------------------------------------------------------------------
+Finally run the make command and after some hours your image is ready.
+
+After the building process finished, go to images directory, insert your sdcard
+and run the below command to write the image to sdcard. make sure the sdcard 
+is unmounted.
+
+$ sudo dd if=sdcard.img of=/dev/sdX status=progress
+
+----------------------------------------------------------------------------
+To set the resolution of the frame buffer, first enter the Uboot command line 
+and run the following command:
+
+$ setenv bootargs ${bootargs} fbcon=map:0 video=HDMI-A-1:1920x1080
+$ saveenv
+
+Also, in order to have the command line interface for HDMI output, we must 
+redirect the console to tty0. For this step open /etc/inittab file and add
+below line to it:
+
+console::respawn:/sbin/getty -L tty0 0 vt100
+
