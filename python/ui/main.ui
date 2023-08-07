@@ -3121,46 +3121,6 @@ QComboBox::drop-down {
               <property name="editable">
                <bool>false</bool>
               </property>
-              <item>
-               <property name="text">
-                <string>UART1 (485/422)</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>UART2 (232)</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>UART4 (485/422)</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>UART5 (232)</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>UART6 (485/422)</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>UART7 (232)</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>UART8 (485/422)</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>UART9 (232)</string>
-               </property>
-              </item>
              </widget>
             </item>
             <item>

@@ -14,7 +14,6 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtGui import QKeySequence 
 from PyQt5.QtCore import QTimer
 from PyQt5 import uic
-import serial
 
 import utils
 import ad7616
@@ -176,14 +175,10 @@ class MainWindow(QMainWindow):
         self.btn_clear_input.clicked.connect(lambda:self.clear_buffer('input'))
         self.btn_clear_output.clicked.connect(lambda:self.clear_buffer('output'))
         
-        # if uart.UART_CTRL_1_485_232_1.get_value() == 1:
-        #     self.current_uart = serial.Serial(uart.UART_DEVICE['UART1 (485/422)'])
-        #     self.cmb_uarts.setCurrentText('UART1 (485/422)')
-        # else:
-        #     self.current_uart = serial.Serial(uart.UART_DEVICE['UART2 (232)'])
-        #     self.cmb_uarts.setCurrentText('UART2 (232)')
+        for port in uart.UARTS:
+            self.cmb_uarts.addItem(f"{port['name']} {port['mode']}")
 
-        self.cmb_uarts.currentTextChanged.connect(self.on_uart_changed)
+        self.cmb_uarts.currentIndexChanged.connect(self.on_uart_changed)
 
         
 ##########################################################################################
@@ -541,24 +536,20 @@ class MainWindow(QMainWindow):
             self.uart_write_timer.stop()
 
     def uart_write(self):
-        pass
-        # if self.current_uart.is_open:
-        #     data = self.txt_output_buffer.toPlainText()
-        #     self.current_uart.write(data.encode())
+        data = self.txt_output_buffer.toPlainText()
+        uart.write_gui(data.encode())
 
     def uart_read(self):
-        pass
-        # if self.current_uart.is_open:
-        #     data = self.current_uart.read_all()
-        #     if data:
-        #         try:
-        #             self.txt_input_buffer.insertPlainText(data.decode())
-        #         except:
-        #             self.txt_input_buffer.insertPlainText(data.hex())
+        data = uart.read_gui()
+        if data:
+            try:
+                self.txt_input_buffer.insertPlainText(data.decode())
+            except Exception:
+                self.txt_input_buffer.insertPlainText(data.hex())
 
-        #         self.txt_input_buffer.verticalScrollBar().setValue(
-        #             self.txt_input_buffer.verticalScrollBar().maximum()
-        #         )
+            self.txt_input_buffer.verticalScrollBar().setValue(
+                self.txt_input_buffer.verticalScrollBar().maximum()
+            )
 
     def clear_buffer(self, buffer):
         if buffer == 'output':
@@ -566,31 +557,10 @@ class MainWindow(QMainWindow):
         else:
             self.txt_input_buffer.clear()
 
-    def on_uart_changed(self, uart_port):
-        pass
-        # self.current_uart.close()
+    def on_uart_changed(self, idx):
+        uart.set_ctrl_pins(uart.UARTS[idx]['gpio'])
+        uart.change_current_uart_gui(idx)
         
-        # if uart_port == 'UART1 (485/422)':
-        #     uart.UART_CTRL_1_485_232_1.set_value(1)
-        # elif uart_port == 'UART2 (232)':
-        #     uart.UART_CTRL_1_485_232_1.set_value(0)
-        # elif uart_port == 'UART4 (485/422)':
-        #     uart.UART_CTRL_1_485_232_2.set_value(1)
-        # elif uart_port == 'UART5 (232)':
-        #     uart.UART_CTRL_1_485_232_2.set_value(0)
-        # elif uart_port == 'UART6 (485/422)':
-        #     uart.UART_CTRL_2_485_232_1.set_value(1)
-        # elif uart_port == 'UART7 (232)':
-        #     uart.UART_CTRL_2_485_232_1.set_value(0)
-        # elif uart_port == 'UART8 (485/422)':
-        #     uart.UART_CTRL_2_485_232_2.set_value(1)
-        # elif uart_port == 'UART9 (232)':
-        #     uart.UART_CTRL_2_485_232_2.set_value(0)
-
-        # self.current_uart.port = uart.UART_DEVICE[uart_port]
-        # self.current_uart.open()
-        
-
 ##########################################################################################
 ##########################################################################################
 ##########################################################################################

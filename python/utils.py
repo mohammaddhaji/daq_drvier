@@ -2,9 +2,13 @@ import os
 
 
 DEBUG = True if os.name=='nt' else False
+PRINT_PACKETS = False
 
 # Colorful text for terminal ------------------------------------------------
 COLORIZE = True
+
+
+DEFAULT_BAUDRATE = 9600 
 
 class bcolors:
     PURPLE = '\033[95m'
@@ -36,7 +40,7 @@ def CYAN(txt):
 #----------------------------------------------------------------------------
 
 def debug_print(info):
-    if DEBUG: print(info)
+    if PRINT_PACKETS: print(info)
 
 def format_packet(packet):
     return f"({BLUE(' '.join(packet.hex()[i:i+2].upper() for i in range(0, len(packet.hex()), 2)))})"
@@ -44,6 +48,25 @@ def format_packet(packet):
 
 def clear_screen():
     os.system('cls' if os.name=='nt' else 'clear')
+
+
+def print_table(data_list, headers=None):
+    all_data = [headers] + data_list if headers is not None else data_list
+    col_widths = [max(len(str(item)) for item in col) for col in zip(*all_data)]
+
+    if headers:
+        all_data.remove(headers)
+        print("+" + "+".join(["-" * (width + 2) for width in col_widths]) + "+")
+        print("| " + " | ".join(["{:<{width}}".format(str(item), width=width) for item, width in zip(headers, col_widths)]) + " |")
+        print("+" + "+".join(["-" * (width + 2) for width in col_widths]) + "+")
+
+    if not headers:
+        print("+" + "+".join(["-" * (width + 2) for width in col_widths]) + "+")
+
+    for row in all_data:
+        print("| " + " | ".join(["{:<{width}}".format(str(item), width=width) for item, width in zip(row, col_widths)]) + " |")
+
+    print("+" + "+".join(["-" * (width + 2) for width in col_widths]) + "+")
 
 
 
