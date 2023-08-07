@@ -9,10 +9,6 @@
 #define	CONSUMER    "UART_DRIVER"
 #endif
 
-static const char *gpiochip8 = "gpiochip8";
-static const char *gpiochip7 = "gpiochip7";
-static const char *gpiochip5 = "gpiochip5";
-static const char *gpiochip1 = "gpiochip1";
 static struct gpiod_chip *chip8;
 static struct gpiod_chip *chip7;
 static struct gpiod_chip *chip5;
@@ -32,258 +28,123 @@ static struct gpiod_line *UART_CTRL_2_DXEN1;
 static struct gpiod_line *UART_CTRL_2_DXEN2;
 static struct gpiod_line *UART_CTRL_2_RXEN2;
 
+// control pins digital level
+const int uart_modes[][4] = {
+    [UART_1X_4X_6X_8X]             = {1, 1, 1, 1},
+    [UART_1X_4X_6X_8Y_9Y]          = {1, 1, 1, 0},
+    [UART_1X_4X_6Y_7Y_8X]          = {1, 1, 0, 1},
+    [UART_1X_4X_6Y_7Y_8Y_9Y]       = {1, 1, 0, 0},
+    [UART_1X_4Y_5Y_6X_8X]          = {1, 0, 1, 1},
+    [UART_1X_4Y_5Y_6X_8Y_9Y]       = {1, 0, 1, 0},
+    [UART_1X_4Y_5Y_6Y_7Y_8X]       = {1, 0, 0, 1},
+    [UART_1X_4Y_5Y_6Y_7Y_8Y_9Y]    = {1, 0, 0, 0},
+    [UART_1Y_2Y_4X_6X_8X]          = {0, 1, 1, 1},
+    [UART_1Y_2Y_4X_6X_8Y_9Y]       = {0, 1, 1, 0},
+    [UART_1Y_2Y_4X_6Y_7Y_8X]       = {0, 1, 0, 1},
+    [UART_1Y_2Y_4X_6Y_7Y_8Y_9Y]    = {0, 1, 0, 0},
+    [UART_1Y_2Y_4Y_5Y_6X_8X]       = {0, 0, 1, 1},
+    [UART_1Y_2Y_4Y_5Y_6X_8Y_9Y]    = {0, 0, 1, 0},
+    [UART_1Y_2Y_4Y_5Y_6Y_7Y_8X]    = {0, 0, 0, 1},
+    [UART_1Y_2Y_4Y_5Y_6Y_7Y_8Y_9Y] = {0, 0, 0, 0},
+};
 
 static bool init_done = false;
+
+#define CHECK_AND_GOTO_ON_FAILURE(expr, label) \
+    do { \
+        if (!(expr)) { \
+            goto label; \
+        } \
+    } while (0)
+
+
+struct gpiod_line* REQ_GPIO(struct gpiod_chip* chip, int line, int value) {
+
+    struct gpiod_line* gpio = gpiod_chip_get_line(chip, line);
+    if (!gpio) {
+        printf("Error getting GPIO: %s line: %d\n", gpiod_chip_name(chip), line);
+        return NULL;
+    }
+    
+    int request_result = gpiod_line_request_output(gpio, "UART_DRVIER", value);
+    if (request_result < 0) {
+        printf("Error requesting GPIO: %s line: %d as output\n", gpiod_chip_name(chip), line);
+        gpiod_line_release(gpio);
+        return NULL;
+    }
+    
+    int set_value_result = gpiod_line_set_value(gpio, value);
+    if (set_value_result < 0) {
+        printf("Error setting GPIO: %s line: %d value: %d\n", gpiod_chip_name(chip), line, value);
+        gpiod_line_release(gpio);
+        return NULL;
+    }
+    
+    return gpio;
+}
 
 
 int UART_Open(uint8_t mode)
 {
     if (init_done) return 0;
 
-    int ret;
+    chip8 = gpiod_chip_open_by_name("gpiochip8");
+    CHECK_AND_GOTO_ON_FAILURE(chip8, cleanup);
 
-    chip8 = gpiod_chip_open_by_name(gpiochip8);
-    if (!chip8) 
-    {
-        printf("UART: Open gpiochip8 failed\n");
-        ret = -1;
-        goto end;
-    }
-    chip7 = gpiod_chip_open_by_name(gpiochip7);
-    if (!chip7) 
-    {
-        printf("UART: Open gpiochip7 failed\n");
-        ret = -1;
-        goto close_chip8;
-    }
-    chip5 = gpiod_chip_open_by_name(gpiochip5);
-    if (!chip5) 
-    {
-        printf("UART: Open gpiochip5 failed\n");
-        ret = -1;
-        goto close_chip7;
-    }
-    chip1 = gpiod_chip_open_by_name(gpiochip1);
-    if (!chip1) 
-    {
-        printf("UART: Open gpiochip1 failed\n");
-        ret = -1;
-        goto close_chip5;
-    }
+    chip7 = gpiod_chip_open_by_name("gpiochip7");
+    CHECK_AND_GOTO_ON_FAILURE(chip7, cleanup_chip8);
 
-    // CTRL 1 (LTC2872)-------------------------------------------------------------------
+    chip5 = gpiod_chip_open_by_name("gpiochip5");
+    CHECK_AND_GOTO_ON_FAILURE(chip5, cleanup_chip7);
 
-    UART_CTRL_1_485_232_1 = gpiod_chip_get_line(chip5, 13);
-	if (!UART_CTRL_1_485_232_1)
-    {
-		printf("Get UART_CTRL_1_485_232_1 failed\n");
-        ret = -1;
-        goto close_chip1;
-	}
-    // 1 ---> uart1 (485/422), 0 ---> uart2 (232)
-    ret = gpiod_line_request_output(UART_CTRL_1_485_232_1, CONSUMER, 1);
-	if (ret < 0)
-    {
-		printf("Request UART_CTRL_1_485_232_1 as output failed\n");
-        goto release_UART_CTRL_1_485_232_1;
-	}
+    chip1 = gpiod_chip_open_by_name("gpiochip1");
+    CHECK_AND_GOTO_ON_FAILURE(chip1, cleanup_chip5);
 
-    UART_CTRL_1_485_232_2 = gpiod_chip_get_line(chip5, 14);
-	if (!UART_CTRL_1_485_232_2)
-    {
-		printf("Get UART_CTRL_1_485_232_2 failed\n");
-        ret = -1;
-        goto release_UART_CTRL_1_485_232_1;
-	}
-    // 1 ---> uart4 (485/422), 0 ---> uart5 (232)
-    ret = gpiod_line_request_output(UART_CTRL_1_485_232_2, CONSUMER, 1);
-	if (ret < 0)
-    {
-		printf("Request UART_CTRL_1_485_232_2 as output failed\n");
-        goto release_UART_CTRL_1_485_232_2;
-	}
+    // CTRL 1 (LTC2872)------------------------------------------------------------
 
-    UART_CTRL_1_LB = gpiod_chip_get_line(chip5, 25);
-	if (!UART_CTRL_1_LB)
-    {
-		printf("Get UART_CTRL_1_LB failed\n");
-        ret = -1;
-        goto release_UART_CTRL_1_485_232_2;
-	}
-    // Loop Back
-    ret = gpiod_line_request_output(UART_CTRL_1_LB, CONSUMER, 0);
-	if (ret < 0)
-    {
-		printf("Request UART_CTRL_1_LB as output failed\n");
-        goto release_UART_CTRL_1_LB;
-	}
+    UART_CTRL_1_485_232_1 = REQ_GPIO(chip5, 13, 1);
+    CHECK_AND_GOTO_ON_FAILURE(UART_CTRL_1_485_232_1, cleanup_chip1);
 
-    UART_CTRL_1_RXEN1 = gpiod_chip_get_line(chip5, 27);
-	if (!UART_CTRL_1_RXEN1)
-    {
-		printf("Get UART_CTRL_1_RXEN1 failed\n");
-        ret = -1;
-        goto release_UART_CTRL_1_LB;
-	}
-    // 0 ---> Enable RX uart1,2 
-    ret = gpiod_line_request_output(UART_CTRL_1_RXEN1, CONSUMER, 0);
-	if (ret < 0)
-    {
-		printf("Request UART_CTRL_1_RXEN1 as output failed\n");
-        goto release_UART_CTRL_1_RXEN1;
-	}
+    UART_CTRL_1_485_232_2 = REQ_GPIO(chip5, 14, 1);
+    CHECK_AND_GOTO_ON_FAILURE(UART_CTRL_1_485_232_2, cleanup_UART_CTRL_1_485_232_1);
 
-    UART_CTRL_1_DXEN1 = gpiod_chip_get_line(chip5, 28);
-	if (!UART_CTRL_1_DXEN1)
-    {
-		printf("Get UART_CTRL_1_DXEN1 failed\n");
-        ret = -1;
-        goto release_UART_CTRL_1_RXEN1;
-	}
-    // 1 ---> Enable Tx uart1,2 
-    ret = gpiod_line_request_output(UART_CTRL_1_DXEN1, CONSUMER, 1);
-	if (ret < 0)
-    {
-		printf("Request UART_CTRL_1_DXEN1 as output failed\n");
-        goto release_UART_CTRL_1_DXEN1;
-	}
+    UART_CTRL_1_LB = REQ_GPIO(chip5, 25, 0);
+    CHECK_AND_GOTO_ON_FAILURE(UART_CTRL_1_LB, cleanup_UART_CTRL_1_485_232_2);
 
-    UART_CTRL_1_DXEN2 = gpiod_chip_get_line(chip5, 29);
-	if (!UART_CTRL_1_DXEN2)
-    {
-		printf("Get UART_CTRL_1_DXEN2 failed\n");
-        ret = -1;
-        goto release_UART_CTRL_1_DXEN1;
-	}
-    // 1 ---> Enable Tx uart4,5
-    ret = gpiod_line_request_output(UART_CTRL_1_DXEN2, CONSUMER, 1);
-	if (ret < 0)
-    {
-		printf("Request UART_CTRL_1_DXEN2 as output failed\n");
-        goto release_UART_CTRL_1_DXEN2;
-	}
+    UART_CTRL_1_RXEN1 = REQ_GPIO(chip5, 27, 0);
+    CHECK_AND_GOTO_ON_FAILURE(UART_CTRL_1_RXEN1, cleanup_UART_CTRL_1_LB);
 
-    UART_CTRL_1_RXEN2 = gpiod_chip_get_line(chip5, 30);
-	if (!UART_CTRL_1_RXEN2)
-    {
-		printf("Get UART_CTRL_1_RXEN2 failed\n");
-        ret = -1;
-        goto release_UART_CTRL_1_DXEN2;
-	}
-    // 0 ---> Enable Rx uart4,5
-    ret = gpiod_line_request_output(UART_CTRL_1_RXEN2, CONSUMER, 0);
-	if (ret < 0)
-    {
-		printf("Request UART_CTRL_1_RXEN2 as output failed\n");
-        goto release_UART_CTRL_1_RXEN2;
-	}
+    UART_CTRL_1_DXEN1 = REQ_GPIO(chip5, 28, 1);
+    CHECK_AND_GOTO_ON_FAILURE(UART_CTRL_1_DXEN1, cleanup_UART_CTRL_1_RXEN1);
 
-    // CTRL 2 (LTC2872)-------------------------------------------------------------------
+    UART_CTRL_1_DXEN2 = REQ_GPIO(chip5, 29, 1);
+    CHECK_AND_GOTO_ON_FAILURE(UART_CTRL_1_DXEN2, cleanup_UART_CTRL_1_DXEN1);
 
-    UART_CTRL_2_485_232_1 = gpiod_chip_get_line(chip5, 31);
-	if (!UART_CTRL_2_485_232_1)
-    {
-		printf("Get UART_CTRL_2_485_232_1 failed\n");
-        ret = -1;
-        goto release_UART_CTRL_1_RXEN2;
-	}
-    // 1 ---> uart6 (485/422), 0 ---> uart7 (232)
-    ret = gpiod_line_request_output(UART_CTRL_2_485_232_1, CONSUMER, 1);
-	if (ret < 0)
-    {
-		printf("Request UART_CTRL_2_485_232_1 as output failed\n");
-        goto release_UART_CTRL_2_485_232_1;
-	}
+    UART_CTRL_1_RXEN2 = REQ_GPIO(chip5, 30, 0);
+    CHECK_AND_GOTO_ON_FAILURE(UART_CTRL_1_RXEN2, cleanup_UART_CTRL_1_DXEN2);
 
-    UART_CTRL_2_485_232_2 = gpiod_chip_get_line(chip1, 22);
-	if (!UART_CTRL_2_485_232_2)
-    {
-		printf("Get UART_CTRL_2_485_232_2 failed\n");
-        ret = -1;
-        goto release_UART_CTRL_2_485_232_1;
-	}
-    // 1 ---> uart8 (485/422), 0 ---> uart9 (232)
-    ret = gpiod_line_request_output(UART_CTRL_2_485_232_2, CONSUMER, 1);
-	if (ret < 0)
-    {
-		printf("Request UART_CTRL_2_485_232_2 as output failed\n");
-        goto release_UART_CTRL_2_485_232_2;
-	}
+    // CTRL 2 (LTC2872)------------------------------------------------------------
 
-    UART_CTRL_2_LB = gpiod_chip_get_line(chip7, 29);
-	if (!UART_CTRL_2_LB)
-    {
-		printf("Get UART_CTRL_2_LB failed\n");
-        ret = -1;
-        goto release_UART_CTRL_2_485_232_2;
-	}
-    // Loop Back
-    ret = gpiod_line_request_output(UART_CTRL_2_LB, CONSUMER, 0);
-	if (ret < 0)
-    {
-		printf("Request UART_CTRL_2_LB as output failed\n");
-        goto release_UART_CTRL_2_LB;
-	}
+    UART_CTRL_2_485_232_1 = REQ_GPIO(chip5, 31, 1);
+    CHECK_AND_GOTO_ON_FAILURE(UART_CTRL_2_485_232_1, cleanup_UART_CTRL_1_RXEN2);
 
-    UART_CTRL_2_RXEN1 = gpiod_chip_get_line(chip7, 31);
-	if (!UART_CTRL_2_RXEN1)
-    {
-		printf("Get UART_CTRL_2_RXEN1 failed\n");
-        ret = -1;
-        goto release_UART_CTRL_2_LB;
-	}
-    // 0 ---> Enable RX uart6,7
-    ret = gpiod_line_request_output(UART_CTRL_2_RXEN1, CONSUMER, 0);
-	if (ret < 0)
-    {
-		printf("Request UART_CTRL_2_RXEN1 as output failed\n");
-        goto release_UART_CTRL_2_RXEN1;
-	}
+    UART_CTRL_2_485_232_2 = REQ_GPIO(chip1, 22, 1);
+    CHECK_AND_GOTO_ON_FAILURE(UART_CTRL_2_485_232_2, cleanup_UART_CTRL_2_485_232_1);
 
-    UART_CTRL_2_DXEN1 = gpiod_chip_get_line(chip1, 0);
-	if (!UART_CTRL_2_DXEN1)
-    {
-		printf("Get UART_CTRL_2_DXEN1 failed\n");
-        ret = -1;
-        goto release_UART_CTRL_2_RXEN1;
-	}
-    // 1 ---> Enable TX uart6,7
-    ret = gpiod_line_request_output(UART_CTRL_2_DXEN1, CONSUMER, 1);
-	if (ret < 0)
-    {
-		printf("Request UART_CTRL_2_DXEN1 as output failed\n");
-        goto release_UART_CTRL_2_DXEN1;
-	}
+    UART_CTRL_2_LB = REQ_GPIO(chip7, 29, 0);
+    CHECK_AND_GOTO_ON_FAILURE(UART_CTRL_2_LB, cleanup_UART_CTRL_2_485_232_2);
 
-    UART_CTRL_2_DXEN2 = gpiod_chip_get_line(chip1, 1);
-	if (!UART_CTRL_2_DXEN2)
-    {
-		printf("Get UART_CTRL_2_DXEN2 failed\n");
-        ret = -1;
-        goto release_UART_CTRL_2_DXEN1;
-	}
-    // 1 ---> Enable TX uart8,9
-    ret = gpiod_line_request_output(UART_CTRL_2_DXEN2, CONSUMER, 1);
-	if (ret < 0)
-    {
-		printf("Request UART_CTRL_2_DXEN2 as output failed\n");
-        goto release_UART_CTRL_2_DXEN2;
-	}
+    UART_CTRL_2_RXEN1 = REQ_GPIO(chip7, 31, 0);
+    CHECK_AND_GOTO_ON_FAILURE(UART_CTRL_2_RXEN1, cleanup_UART_CTRL_2_LB);
 
-    UART_CTRL_2_RXEN2 = gpiod_chip_get_line(chip1, 2);
-	if (!UART_CTRL_2_RXEN2)
-    {
-		printf("Get UART_CTRL_2_RXEN2 failed\n");
-        ret = -1;
-        goto release_UART_CTRL_2_DXEN2;
-	}
-    // 1 ---> Enable TX uart8,9
-    ret = gpiod_line_request_output(UART_CTRL_2_RXEN2, CONSUMER, 0);
-	if (ret < 0)
-    {
-		printf("Request UART_CTRL_2_RXEN2 as output failed\n");
-        goto release_UART_CTRL_2_RXEN2;
-	}
+    UART_CTRL_2_DXEN1 = REQ_GPIO(chip1, 0, 1);
+    CHECK_AND_GOTO_ON_FAILURE(UART_CTRL_2_DXEN1, cleanup_UART_CTRL_2_RXEN1);
+
+    UART_CTRL_2_DXEN2 = REQ_GPIO(chip1, 1, 1);
+    CHECK_AND_GOTO_ON_FAILURE(UART_CTRL_2_DXEN2, cleanup_UART_CTRL_2_DXEN1);
+
+    UART_CTRL_2_RXEN2 = REQ_GPIO(chip1, 2, 0);
+    CHECK_AND_GOTO_ON_FAILURE(UART_CTRL_2_RXEN2, cleanup_UART_CTRL_2_DXEN2);
 
     init_done = true;
 
@@ -292,45 +153,43 @@ int UART_Open(uint8_t mode)
     return 0;
 
 
-release_UART_CTRL_2_RXEN2:
-    gpiod_line_release(UART_CTRL_2_RXEN2);
-release_UART_CTRL_2_DXEN2:
+cleanup_UART_CTRL_2_DXEN2:
     gpiod_line_release(UART_CTRL_2_DXEN2);
-release_UART_CTRL_2_DXEN1:
+cleanup_UART_CTRL_2_DXEN1:
     gpiod_line_release(UART_CTRL_2_DXEN1);
-release_UART_CTRL_2_RXEN1:
+cleanup_UART_CTRL_2_RXEN1:
     gpiod_line_release(UART_CTRL_2_RXEN1);
-release_UART_CTRL_2_LB:
+cleanup_UART_CTRL_2_LB:
     gpiod_line_release(UART_CTRL_2_LB);
-release_UART_CTRL_2_485_232_2:
+cleanup_UART_CTRL_2_485_232_2:
     gpiod_line_release(UART_CTRL_2_485_232_2);
-release_UART_CTRL_2_485_232_1:
+cleanup_UART_CTRL_2_485_232_1:
     gpiod_line_release(UART_CTRL_2_485_232_1);
-release_UART_CTRL_1_RXEN2:
+cleanup_UART_CTRL_1_RXEN2:
     gpiod_line_release(UART_CTRL_1_RXEN2);
-release_UART_CTRL_1_DXEN2:
+cleanup_UART_CTRL_1_DXEN2:
     gpiod_line_release(UART_CTRL_1_DXEN2);
-release_UART_CTRL_1_DXEN1:
+cleanup_UART_CTRL_1_DXEN1:
     gpiod_line_release(UART_CTRL_1_DXEN1);
-release_UART_CTRL_1_RXEN1:
+cleanup_UART_CTRL_1_RXEN1:
     gpiod_line_release(UART_CTRL_1_RXEN1);
-release_UART_CTRL_1_LB:
+cleanup_UART_CTRL_1_LB:
     gpiod_line_release(UART_CTRL_1_LB);
-release_UART_CTRL_1_485_232_2:
+cleanup_UART_CTRL_1_485_232_2:
     gpiod_line_release(UART_CTRL_1_485_232_2);
-release_UART_CTRL_1_485_232_1:
+cleanup_UART_CTRL_1_485_232_1:
     gpiod_line_release(UART_CTRL_1_485_232_1);
-close_chip1:
+cleanup_chip1:
     gpiod_chip_close(chip1);
-close_chip5:
+cleanup_chip5:
     gpiod_chip_close(chip5);
-close_chip7:
+cleanup_chip7:
     gpiod_chip_close(chip7);
-close_chip8:
+cleanup_chip8:
     gpiod_chip_close(chip8);
-end:
+cleanup:
     init_done = false;
-    return ret;
+    return -1;
 }
 
 
@@ -376,116 +235,11 @@ void UART_Change_Mode(uint8_t mode)
         return;
     }
 
-    if (mode == UART_1_4_6_8)
-    {
-        gpiod_line_set_value(UART_CTRL_1_485_232_1, 1);
-        gpiod_line_set_value(UART_CTRL_1_485_232_2, 1);
-        gpiod_line_set_value(UART_CTRL_2_485_232_1, 1);
-        gpiod_line_set_value(UART_CTRL_2_485_232_2, 1);
-    }
-    else if (mode == UART_1_4_6_9)
-    {
-        gpiod_line_set_value(UART_CTRL_1_485_232_1, 1);
-        gpiod_line_set_value(UART_CTRL_1_485_232_2, 1);
-        gpiod_line_set_value(UART_CTRL_2_485_232_1, 1);
-        gpiod_line_set_value(UART_CTRL_2_485_232_2, 0);
-    }
-    else if (mode == UART_1_4_7_8)
-    {
-        gpiod_line_set_value(UART_CTRL_1_485_232_1, 1);
-        gpiod_line_set_value(UART_CTRL_1_485_232_2, 1);
-        gpiod_line_set_value(UART_CTRL_2_485_232_1, 0);
-        gpiod_line_set_value(UART_CTRL_2_485_232_2, 1);
-    }
-    else if (mode == UART_1_4_7_9)
-    {
-        gpiod_line_set_value(UART_CTRL_1_485_232_1, 1);
-        gpiod_line_set_value(UART_CTRL_1_485_232_2, 1);
-        gpiod_line_set_value(UART_CTRL_2_485_232_1, 0);
-        gpiod_line_set_value(UART_CTRL_2_485_232_2, 0);
-    }
-    else if (mode == UART_1_5_6_8)
-    {
-        gpiod_line_set_value(UART_CTRL_1_485_232_1, 1);
-        gpiod_line_set_value(UART_CTRL_1_485_232_2, 0);
-        gpiod_line_set_value(UART_CTRL_2_485_232_1, 1);
-        gpiod_line_set_value(UART_CTRL_2_485_232_2, 1);
-    }
-    else if (mode == UART_1_5_6_9)
-    {
-        gpiod_line_set_value(UART_CTRL_1_485_232_1, 1);
-        gpiod_line_set_value(UART_CTRL_1_485_232_2, 0);
-        gpiod_line_set_value(UART_CTRL_2_485_232_1, 1);
-        gpiod_line_set_value(UART_CTRL_2_485_232_2, 0);
-    }
-    else if (mode == UART_1_5_7_8)
-    {
-        gpiod_line_set_value(UART_CTRL_1_485_232_1, 1);
-        gpiod_line_set_value(UART_CTRL_1_485_232_2, 0);
-        gpiod_line_set_value(UART_CTRL_2_485_232_1, 0);
-        gpiod_line_set_value(UART_CTRL_2_485_232_2, 1);
-    }
-    else if (mode == UART_1_5_7_9)
-    {
-        gpiod_line_set_value(UART_CTRL_1_485_232_1, 1);
-        gpiod_line_set_value(UART_CTRL_1_485_232_2, 0);
-        gpiod_line_set_value(UART_CTRL_2_485_232_1, 0);
-        gpiod_line_set_value(UART_CTRL_2_485_232_2, 0);
-    }
-    else if (mode == UART_2_4_6_8)
-    {
-        gpiod_line_set_value(UART_CTRL_1_485_232_1, 0);
-        gpiod_line_set_value(UART_CTRL_1_485_232_2, 1);
-        gpiod_line_set_value(UART_CTRL_2_485_232_1, 1);
-        gpiod_line_set_value(UART_CTRL_2_485_232_2, 1);
-    }
-    else if (mode == UART_2_4_6_9)
-    {
-        gpiod_line_set_value(UART_CTRL_1_485_232_1, 0);
-        gpiod_line_set_value(UART_CTRL_1_485_232_2, 1);
-        gpiod_line_set_value(UART_CTRL_2_485_232_1, 1);
-        gpiod_line_set_value(UART_CTRL_2_485_232_2, 0);
-    }
-    else if (mode == UART_2_4_7_8)
-    {
-        gpiod_line_set_value(UART_CTRL_1_485_232_1, 0);
-        gpiod_line_set_value(UART_CTRL_1_485_232_2, 1);
-        gpiod_line_set_value(UART_CTRL_2_485_232_1, 0);
-        gpiod_line_set_value(UART_CTRL_2_485_232_2, 1);
-    }
-    else if (mode == UART_2_4_7_9)
-    {
-        gpiod_line_set_value(UART_CTRL_1_485_232_1, 0);
-        gpiod_line_set_value(UART_CTRL_1_485_232_2, 1);
-        gpiod_line_set_value(UART_CTRL_2_485_232_1, 0);
-        gpiod_line_set_value(UART_CTRL_2_485_232_2, 0);
-    }
-    else if (mode == UART_2_5_6_8)
-    {
-        gpiod_line_set_value(UART_CTRL_1_485_232_1, 0);
-        gpiod_line_set_value(UART_CTRL_1_485_232_2, 0);
-        gpiod_line_set_value(UART_CTRL_2_485_232_1, 1);
-        gpiod_line_set_value(UART_CTRL_2_485_232_2, 1);
-    }
-    else if (mode == UART_2_5_6_9)
-    {
-        gpiod_line_set_value(UART_CTRL_1_485_232_1, 0);
-        gpiod_line_set_value(UART_CTRL_1_485_232_2, 0);
-        gpiod_line_set_value(UART_CTRL_2_485_232_1, 1);
-        gpiod_line_set_value(UART_CTRL_2_485_232_2, 0);
-    }
-    else if (mode == UART_2_5_7_8)
-    {
-        gpiod_line_set_value(UART_CTRL_1_485_232_1, 0);
-        gpiod_line_set_value(UART_CTRL_1_485_232_2, 0);
-        gpiod_line_set_value(UART_CTRL_2_485_232_1, 0);
-        gpiod_line_set_value(UART_CTRL_2_485_232_2, 1);
-    }
-    else if (mode == UART_2_5_7_9)
-    {
-        gpiod_line_set_value(UART_CTRL_1_485_232_1, 0);
-        gpiod_line_set_value(UART_CTRL_1_485_232_2, 0);
-        gpiod_line_set_value(UART_CTRL_2_485_232_1, 0);
-        gpiod_line_set_value(UART_CTRL_2_485_232_2, 0);
-    }
+    const int* config = uart_modes[mode];
+
+    gpiod_line_set_value(UART_CTRL_1_485_232_1, config[0])
+    gpiod_line_set_value(UART_CTRL_1_485_232_2, config[1])
+    gpiod_line_set_value(UART_CTRL_2_485_232_1, config[2])
+    gpiod_line_set_value(UART_CTRL_2_485_232_2, config[3])
+    
 }
